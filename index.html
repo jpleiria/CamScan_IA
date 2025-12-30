@@ -3,319 +3,545 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>CBSL Fleet Manager</title>
+    <title>CBSL "IA" Commander</title>
     
+    <!-- Bibliotecas Essenciais -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts: Roboto para leitura fácil -->
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700;900&display=swap" rel="stylesheet">
 
     <style>
         body { font-family: 'Roboto', sans-serif; user-select: none; -webkit-user-select: none; overscroll-behavior: none; }
-        .glass-panel { background: rgba(17, 24, 39, 0.9); backdrop-filter: blur(12px); border-top: 1px solid rgba(255, 255, 255, 0.1); }
-        .scanner-beam { position: absolute; width: 100%; height: 4px; background: #ef4444; box-shadow: 0 0 15px #ef4444; animation: beam-move 2s infinite ease-in-out; opacity: 0.7; }
-        @keyframes beam-move { 0% { top: 10%; opacity: 0; } 50% { opacity: 1; } 100% { top: 90%; opacity: 0; } }
-        .vehicle-card { transition: all 0.2s; border: 1px solid rgba(255,255,255,0.1); }
-        .vehicle-card:active { transform: scale(0.95); background: rgba(220, 38, 38, 0.2); border-color: #ef4444; }
+        
+        /* UI Glassmorphism */
+        .glass-panel {
+            background: rgba(17, 24, 39, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Scan Animation */
+        .scanner-beam {
+            position: absolute;
+            width: 100%;
+            height: 4px;
+            background: #ef4444;
+            box-shadow: 0 0 15px #ef4444;
+            animation: beam-move 2s infinite ease-in-out;
+            opacity: 0.7;
+        }
+
+        @keyframes beam-move {
+            0% { top: 10%; opacity: 0; }
+            50% { opacity: 1; }
+            100% { top: 90%; opacity: 0; }
+        }
+
+        /* Checkbox Animation */
+        .check-anim { animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        @keyframes popIn { from { transform: scale(0); } to { transform: scale(1); } }
+
+        /* Hidden Scrollbar */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
 <body class="bg-gray-900 text-white h-screen w-screen overflow-hidden flex flex-col">
 
-    <!-- HEADER -->
+    <!-- === HEADER (Barra de Topo) === -->
     <header class="absolute top-0 w-full z-30 p-3 flex justify-between items-center bg-gradient-to-b from-black/90 to-transparent">
         <div class="flex items-center gap-2">
-            <div class="bg-red-600 w-8 h-8 rounded flex items-center justify-center font-bold">F</div>
+            <i class="fas fa-shield-alt text-red-600 text-xl"></i>
             <div>
-                <h1 class="font-black text-sm tracking-wider">FLEET MANAGER</h1>
+                <h1 class="font-black text-sm tracking-wider">CBSL COMMANDER</h1>
                 <div class="flex items-center gap-1">
                     <div id="statusDot" class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></div>
-                    <span id="vehicleLabel" class="text-[10px] text-gray-400 font-mono font-bold uppercase">SEM VIATURA</span>
+                    <span id="statusText" class="text-[10px] text-gray-400 font-mono">INICIALIZAR...</span>
                 </div>
             </div>
         </div>
-        <button id="btnExitVehicle" class="hidden px-3 py-1 bg-gray-800 rounded text-xs border border-gray-600">Sair</button>
+        
+        <!-- Botões de Utilidade Rápida -->
+        <div class="flex gap-3">
+            <button id="btnVoice" class="w-10 h-10 rounded-full bg-gray-800/80 border border-gray-600 flex items-center justify-center text-gray-400 active:text-white transition">
+                <i class="fas fa-volume-mute"></i>
+            </button>
+            <button id="btnReport" class="w-10 h-10 rounded-full bg-red-900/50 border border-red-600 text-red-400 flex items-center justify-center active:bg-red-600 active:text-white transition">
+                <i class="fas fa-camera"></i>
+            </button>
+        </div>
     </header>
 
-    <!-- MAIN VIEWPORT -->
-    <main class="flex-grow relative bg-black flex flex-col justify-center overflow-hidden">
+    <!-- === MAIN VIEWPORT (Câmara + Overlays) === -->
+    <main class="flex-grow relative bg-black flex flex-col justify-center overflow-hidden group">
+        <!-- Video Feed -->
         <video id="webcam" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover z-0"></video>
-        
+        <canvas id="snapshotCanvas" class="hidden"></canvas>
+
         <!-- Start Screen -->
         <div id="startScreen" class="absolute inset-0 z-50 bg-gray-900 flex flex-col items-center justify-center p-6 text-center">
-            <i class="fas fa-truck-fire text-5xl text-red-500 mb-6 animate-pulse"></i>
-            <h2 class="text-2xl font-bold mb-2">Conferência Inteligente</h2>
-            <p class="text-gray-400 text-xs mb-8">Selecione a viatura e aponte a câmara para validar o material.</p>
-            <button id="btnStart" class="bg-red-600 text-white font-bold py-4 px-12 rounded-lg shadow-lg disabled:opacity-50" disabled>INICIAR</button>
+            <div class="w-20 h-20 bg-gray-800 rounded-2xl flex items-center justify-center mb-6 shadow-2xl shadow-red-900/20 border border-gray-700">
+                <i class="fas fa-fire-fighter text-4xl text-red-500"></i>
+            </div>
+            <h2 class="text-2xl font-bold mb-2">Sistema Operacional</h2>
+            <p class="text-gray-400 text-xs mb-8 max-w-[250px]">
+                Ferramenta de apoio à decisão, treino e identificação de material. Requer acesso à câmara e localização.
+            </p>
+            <button id="btnStart" class="bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-10 rounded-lg shadow-lg flex items-center gap-3 transition-transform active:scale-95 disabled:opacity-50" disabled>
+                <span>ATIVAR SISTEMA</span> <i class="fas fa-chevron-right"></i>
+            </button>
         </div>
 
-        <!-- 1. SELETOR DE VIATURA (Overlay) -->
-        <div id="fleetSelector" class="absolute inset-0 z-40 bg-gray-900/95 backdrop-blur hidden flex flex-col p-6 pt-20">
-            <h2 class="text-xl font-bold mb-4 text-center">Selecionar Viatura</h2>
-            <p class="text-xs text-center text-gray-500 mb-6">Escolha o veículo para carregar a lista específica.</p>
-            
-            <div class="grid grid-cols-2 gap-4 overflow-y-auto pb-20" id="fleetGrid">
-                <!-- Gerado via JS -->
-            </div>
-            
-            <div class="mt-4 text-center">
-                <button class="text-xs text-gray-500 flex items-center justify-center gap-2 w-full p-2 border border-dashed border-gray-700 rounded">
-                    <i class="fas fa-qrcode"></i> Ler QR Code (Simulado)
-                </button>
+        <!-- === OVERLAYS POR MODO === -->
+
+        <!-- 1. Overlay SCANNER (Padrão) -->
+        <div id="overlayScanner" class="absolute inset-0 z-10 pointer-events-none hidden mode-overlay">
+            <div class="scanner-beam top-1/2"></div>
+            <div class="absolute bottom-32 left-4 bg-black/60 backdrop-blur px-3 py-1 rounded border-l-2 border-red-500">
+                <p class="text-[10px] text-red-400 font-mono">ALVO ATUAL</p>
+                <p id="scanResult" class="text-xl font-bold">A procurar...</p>
+                <p id="scanConf" class="text-xs text-gray-400">---</p>
             </div>
         </div>
 
-        <!-- 2. CHECKLIST UI -->
-        <div id="overlayChecklist" class="absolute inset-0 z-10 pointer-events-none hidden p-4 pt-24 flex flex-col justify-end pb-24">
-            <!-- Scan Feedback -->
-            <div class="absolute top-20 left-1/2 -translate-x-1/2 bg-black/50 px-4 py-1 rounded-full backdrop-blur border border-white/10 flex items-center gap-2">
-                <div class="w-2 h-2 bg-red-500 rounded-full animate-ping"></div>
-                <span id="scanFeedback" class="text-xs font-mono">A procurar material...</span>
-            </div>
-
-            <!-- Lista flutuante -->
-            <div class="bg-black/80 backdrop-blur rounded-xl border border-gray-700 overflow-hidden pointer-events-auto max-h-[50vh] flex flex-col">
-                <div class="p-3 bg-gray-800 border-b border-gray-700 flex justify-between items-center">
-                    <h3 class="font-bold text-sm text-white"><i class="fas fa-list-check mr-2 text-blue-400"></i><span id="listTitle">Lista</span></h3>
-                    <span id="progressText" class="text-xs font-mono bg-blue-900 px-2 py-0.5 rounded text-blue-200">0%</span>
+        <!-- 2. Overlay TREINO (Missões) -->
+        <div id="overlayGame" class="absolute inset-0 z-10 pointer-events-none hidden mode-overlay flex flex-col items-center pt-24">
+            <div class="bg-black/70 backdrop-blur border border-yellow-500/50 px-6 py-3 rounded-lg text-center shadow-lg transform transition-all duration-300" id="missionBox">
+                <p class="text-[10px] text-yellow-400 uppercase tracking-widest mb-1">MISSÃO DE RECRUTA</p>
+                <h3 class="text-xl font-black text-white" id="missionTarget">ENCONTRA: EXTINTOR</h3>
+                <div class="mt-2 w-full h-1 bg-gray-700 rounded-full overflow-hidden">
+                    <div id="missionProgress" class="h-full bg-yellow-500 w-0 transition-all duration-300"></div>
                 </div>
-                <ul id="checklistItems" class="overflow-y-auto p-2 space-y-2 text-sm flex-grow">
-                    <!-- Items -->
-                </ul>
             </div>
+            <div id="missionSuccess" class="hidden mt-4 bg-green-600 text-white px-4 py-2 rounded-full font-bold animate-bounce">
+                <i class="fas fa-check"></i> CONFIRMADO!
+            </div>
+        </div>
+
+        <!-- 3. Overlay CHECKLIST (Viatura) -->
+        <div id="overlayChecklist" class="absolute inset-0 z-10 pointer-events-none hidden mode-overlay p-6 pt-24">
+            <div class="bg-black/80 backdrop-blur rounded-xl p-4 border border-gray-700 max-w-sm pointer-events-auto">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="font-bold text-sm"><i class="fas fa-clipboard-list text-blue-400 mr-2"></i>Conferência VUCI</h3>
+                    <span id="checkCount" class="text-xs bg-gray-700 px-2 py-0.5 rounded">0/4</span>
+                </div>
+                <ul id="checklistItems" class="space-y-2 text-sm">
+                    <!-- Items gerados via JS -->
+                </ul>
+                <button id="btnResetCheck" class="mt-4 w-full bg-gray-700 hover:bg-gray-600 text-xs py-2 rounded text-gray-300 transition">Reiniciar Lista</button>
+            </div>
+        </div>
+
+        <!-- 4. Overlay HAZMAT (Dados) -->
+        <div id="overlayHazmat" class="absolute inset-0 z-20 bg-gray-900 hidden mode-overlay p-6 flex flex-col overflow-y-auto">
+            <div class="flex items-center gap-3 mb-6 mt-16">
+                <i class="fas fa-biohazard text-orange-500 text-3xl"></i>
+                <h2 class="text-2xl font-bold">Guia ADR</h2>
+            </div>
+            
+            <div class="bg-gray-800 p-4 rounded-lg mb-4 border border-gray-700">
+                <label class="text-xs text-gray-400 uppercase">Pesquisar Código ONU</label>
+                <div class="flex gap-2 mt-2">
+                    <input type="number" id="hazmatInput" placeholder="Ex: 1203" class="w-full bg-gray-900 border border-gray-600 rounded p-3 text-white focus:border-orange-500 focus:outline-none font-mono text-lg">
+                    <button id="btnHazmatSearch" class="bg-orange-600 px-4 rounded text-white font-bold"><i class="fas fa-search"></i></button>
+                </div>
+            </div>
+
+            <div id="hazmatResult" class="hidden bg-gray-800 border-l-4 border-orange-500 p-4 rounded animate-fade-in">
+                <h3 id="hazmatName" class="text-xl font-bold text-white">Gasolina</h3>
+                <p id="hazmatDesc" class="text-sm text-gray-400 mt-1">Matéria Líquida Inflamável.</p>
+                <div class="mt-3 flex gap-2">
+                    <span id="hazmatClass" class="bg-orange-900/50 text-orange-200 text-xs px-2 py-1 rounded border border-orange-800">Classe 3</span>
+                    <span id="hazmatGuide" class="bg-blue-900/50 text-blue-200 text-xs px-2 py-1 rounded border border-blue-800">Guia 128</span>
+                </div>
+                <div class="mt-4 p-3 bg-red-900/20 rounded border border-red-900/50">
+                    <p class="text-xs text-red-300 font-bold"><i class="fas fa-fire mr-1"></i> Ação de Combate:</p>
+                    <p class="text-xs text-gray-300 mt-1">Usar espuma resistente ao álcool. Água pode ser ineficaz. Arrefecer recipientes expostos.</p>
+                </div>
+            </div>
+            
+            <p class="mt-8 text-center text-xs text-gray-600">Base de dados simulada para demonstração.</p>
         </div>
 
     </main>
 
-    <!-- FOOTER -->
-    <footer class="z-30 glass-panel p-4 text-center">
-        <p class="text-[10px] text-gray-500">CBSL AI v3.0 • Mode: Fleet Check</p>
-    </footer>
+    <!-- === FOOTER NAV (Menu de Modos) === -->
+    <nav class="z-30 glass-panel pb-safe">
+        <div class="flex justify-around items-center p-2">
+            <button class="nav-btn active flex flex-col items-center p-2 text-red-500 transition" data-mode="scanner">
+                <i class="fas fa-eye text-xl mb-1"></i>
+                <span class="text-[10px] font-bold">Scanner</span>
+            </button>
+            <button class="nav-btn flex flex-col items-center p-2 text-gray-500 transition hover:text-yellow-400" data-mode="game">
+                <i class="fas fa-gamepad text-xl mb-1"></i>
+                <span class="text-[10px] font-bold">Treino</span>
+            </button>
+            <button class="nav-btn flex flex-col items-center p-2 text-gray-500 transition hover:text-blue-400" data-mode="checklist">
+                <i class="fas fa-clipboard-check text-xl mb-1"></i>
+                <span class="text-[10px] font-bold">Viatura</span>
+            </button>
+            <button class="nav-btn flex flex-col items-center p-2 text-gray-500 transition hover:text-orange-500" data-mode="hazmat">
+                <i class="fas fa-radiation text-xl mb-1"></i>
+                <span class="text-[10px] font-bold">ADR</span>
+            </button>
+        </div>
+    </nav>
 
+    <!-- === LÓGICA JAVASCRIPT === -->
     <script>
-        // === BASE DE DADOS DA FROTA ===
-        // Aqui define o que cada viatura deve ter
-        const fleetDB = [
-            {
-                id: 'VUCI-01',
-                name: 'VUCI 01',
-                desc: 'Urbano - Mercedes',
-                icon: 'fa-truck-medical', // Icon genérico de caminhão
-                items: [
-                    { id: 'helmet', label: 'Capacetes (EPI)', keywords: ['helmet', 'crash helmet', 'hard hat'] },
-                    { id: 'hose', label: 'Mangueiras', keywords: ['hose', 'snake', 'tube'] }, // IA confunde mangueira com cobra as vezes
-                    { id: 'nozzle', label: 'Agulhetas', keywords: ['drill', 'nozzle', 'tool'] }, // Agulheta parece berbequim para a IA
-                    { id: 'axe', label: 'Machado Halligan', keywords: ['axe', 'hatchet', 'hammer'] }
-                ]
-            },
-            {
-                id: 'ABSC-04',
-                name: 'ABSC 04',
-                desc: 'Ambulância INEM',
-                icon: 'fa-ambulance',
-                items: [
-                    { id: 'bag', label: 'Mala de Abordagem', keywords: ['backpack', 'bag', 'suitcase'] },
-                    { id: 'oxygen', label: 'Garrafa O2', keywords: ['bottle', 'oxygen', 'extinguisher'] }, // Garrafas parecem extintores
-                    { id: 'monitor', label: 'Monitor DAE', keywords: ['monitor', 'screen', 'laptop', 'radio'] },
-                    { id: 'stretcher', label: 'Maca', keywords: ['stretcher', 'bed', 'hospital'] }
-                ]
-            },
-            {
-                id: 'VSAT-02',
-                name: 'VSAT 02',
-                desc: 'Desencarceramento',
-                icon: 'fa-car-burst',
-                items: [
-                    { id: 'cone', label: 'Cones Sinalização', keywords: ['cone', 'traffic cone'] },
-                    { id: 'cutter', label: 'Tesoura Hidráulica', keywords: ['chain saw', 'tool', 'cutter', 'scissors'] },
-                    { id: 'generator', label: 'Gerador', keywords: ['generator', 'engine', 'machine'] }
-                ]
-            }
-        ];
-
-        // Estado da Aplicação
+        // === VARIÁVEIS DO SISTEMA ===
         const state = {
-            model: null,
             isRunning: false,
-            currentVehicle: null,
-            checklistStatus: {} // Guarda o estado dos items
+            model: null,
+            mode: 'scanner', // scanner, game, checklist, hazmat
+            voiceEnabled: false,
+            lastSpoken: '',
+            gameTarget: '',
+            gameScore: 0,
+            checklist: [
+                { id: 'helmet', label: 'Capacete', done: false, icon: 'fa-helmet-safety' },
+                { id: 'extinguisher', label: 'Extintor', done: false, icon: 'fa-fire-extinguisher' },
+                { id: 'truck', label: 'Viatura', done: false, icon: 'fa-truck-medical' },
+                { id: 'mask', label: 'Máscara', done: false, icon: 'fa-mask-face' }
+            ],
+            detectedObject: null,
+            detectedConf: 0
+        };
+
+        // Base de Dados ADR Simplificada
+        const hazmatDB = {
+            '1203': { name: 'Gasolina', desc: 'Líquido Inflamável', class: '3', guide: '128' },
+            '1202': { name: 'Gasóleo', desc: 'Líquido Inflamável ou Combustível', class: '3', guide: '128' },
+            '1017': { name: 'Cloro', desc: 'Gás Tóxico e Corrosivo', class: '2.3', guide: '124' },
+            '1075': { name: 'Gás de Petróleo (GPL)', desc: 'Gás Inflamável', class: '2.1', guide: '115' },
+            '3082': { name: 'Substância Perigosa p/ Ambiente', desc: 'Líquida, N.E.', class: '9', guide: '171' }
+        };
+
+        // Dicionário de Tradução e Mapeamento
+        const dictionary = {
+            'fire engine': 'Viatura', 'fire truck': 'Viatura', 'ambulance': 'Ambulância',
+            'helmet': 'Capacete', 'crash helmet': 'Capacete',
+            'gasmask': 'Máscara', 'mask': 'Máscara', 'oxygen mask': 'Máscara',
+            'hatchet': 'Machado', 'axe': 'Machado',
+            'extinguisher': 'Extintor', 
+            'chain saw': 'Motosserra',
+            'ladder': 'Escada',
+            'uniform': 'Fardamento',
+            'trailer truck': 'Camião',
+            'bottle': 'Garrafa',
+            'seat belt': 'Cinto'
         };
 
         // Elementos DOM
         const els = {
             video: document.getElementById('webcam'),
+            canvas: document.getElementById('snapshotCanvas'),
+            btnStart: document.getElementById('btnStart'),
             startScreen: document.getElementById('startScreen'),
-            fleetSelector: document.getElementById('fleetSelector'),
-            overlayChecklist: document.getElementById('overlayChecklist'),
-            fleetGrid: document.getElementById('fleetGrid'),
-            checklistItems: document.getElementById('checklistItems'),
-            vehicleLabel: document.getElementById('vehicleLabel'),
-            btnExit: document.getElementById('btnExitVehicle'),
+            overlays: document.querySelectorAll('.mode-overlay'),
+            navBtns: document.querySelectorAll('.nav-btn'),
+            scanResult: document.getElementById('scanResult'),
+            scanConf: document.getElementById('scanConf'),
             statusDot: document.getElementById('statusDot'),
-            scanFeedback: document.getElementById('scanFeedback'),
-            listTitle: document.getElementById('listTitle'),
-            progressText: document.getElementById('progressText')
+            statusText: document.getElementById('statusText'),
+            btnVoice: document.getElementById('btnVoice'),
+            btnReport: document.getElementById('btnReport'),
+            // Game Elements
+            missionTarget: document.getElementById('missionTarget'),
+            missionProgress: document.getElementById('missionProgress'),
+            missionSuccess: document.getElementById('missionSuccess'),
+            // Checklist Elements
+            checklistItems: document.getElementById('checklistItems'),
+            checkCount: document.getElementById('checkCount'),
+            btnResetCheck: document.getElementById('btnResetCheck'),
+            // Hazmat Elements
+            hazmatInput: document.getElementById('hazmatInput'),
+            btnHazmatSearch: document.getElementById('btnHazmatSearch'),
+            hazmatResult: document.getElementById('hazmatResult'),
+            hazmatName: document.getElementById('hazmatName'),
+            hazmatDesc: document.getElementById('hazmatDesc')
         };
 
-        // 1. INICIALIZAÇÃO
+        // === 1. INICIALIZAÇÃO ===
         async function init() {
             try {
-                // Carregar Mobilenet
+                // Carregar Modelo
                 state.model = await mobilenet.load();
                 
-                document.getElementById('btnStart').disabled = false;
-                els.statusDot.className = "w-2 h-2 rounded-full bg-green-500";
-            } catch (e) {
-                alert("Erro ao carregar IA");
+                // UI Update
+                els.statusDot.classList.replace('bg-yellow-500', 'bg-green-500');
+                els.statusDot.classList.remove('animate-pulse');
+                els.statusText.innerText = "SISTEMA ONLINE";
+                els.btnStart.disabled = false;
+                
+                console.log("IA Carregada");
+            } catch (err) {
+                console.error(err);
+                els.statusText.innerText = "ERRO FATAL";
+                els.statusDot.classList.replace('bg-yellow-500', 'bg-red-600');
+                alert("Erro ao carregar IA. Verifique a internet.");
             }
         }
 
-        // 2. INICIAR CÂMARA E FLUXO
-        document.getElementById('btnStart').addEventListener('click', async () => {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-                els.video.srcObject = stream;
-                els.video.play();
-                els.startScreen.classList.add('hidden');
-                
-                // Abre seletor de viatura
-                openFleetSelector();
-                state.isRunning = true;
-                loop();
-            } catch (e) { alert("Câmara bloqueada."); }
-        });
-
-        // 3. GESTÃO DE FROTA
-        function openFleetSelector() {
-            els.fleetSelector.classList.remove('hidden');
-            els.overlayChecklist.classList.add('hidden');
-            els.btnExit.classList.add('hidden');
+        // === 2. NAVEGAÇÃO ENTRE MODOS ===
+        function switchMode(newMode) {
+            state.mode = newMode;
             
-            els.fleetGrid.innerHTML = '';
-            
-            fleetDB.forEach(vehicle => {
-                const btn = document.createElement('div');
-                btn.className = "vehicle-card bg-gray-800 p-4 rounded-xl cursor-pointer flex flex-col items-center gap-2";
-                btn.onclick = () => selectVehicle(vehicle);
-                
-                btn.innerHTML = `
-                    <div class="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center text-xl text-white">
-                        <i class="fas ${vehicle.icon}"></i>
-                    </div>
-                    <div class="text-center">
-                        <h3 class="font-bold text-sm text-white">${vehicle.name}</h3>
-                        <p class="text-[10px] text-gray-400">${vehicle.desc}</p>
-                    </div>
-                `;
-                els.fleetGrid.appendChild(btn);
+            // 1. Atualizar Botões
+            els.navBtns.forEach(btn => {
+                if(btn.dataset.mode === newMode) {
+                    btn.classList.add('text-red-500', 'active');
+                    btn.classList.remove('text-gray-500');
+                } else {
+                    btn.classList.remove('text-red-500', 'active');
+                    btn.classList.add('text-gray-500');
+                }
             });
-        }
 
-        function selectVehicle(vehicle) {
-            state.currentVehicle = vehicle;
+            // 2. Atualizar Overlays
+            els.overlays.forEach(ov => ov.classList.add('hidden'));
             
-            // Inicializar estado da checklist (tudo a false)
-            state.checklistStatus = {};
-            vehicle.items.forEach(i => state.checklistStatus[i.id] = false);
-
-            // Atualizar UI
-            els.fleetSelector.classList.add('hidden');
-            els.overlayChecklist.classList.remove('hidden');
-            els.vehicleLabel.innerText = vehicle.name;
-            els.listTitle.innerText = `Lista ${vehicle.id}`;
-            els.btnExit.classList.remove('hidden');
-
-            renderChecklist();
+            if (newMode === 'scanner') document.getElementById('overlayScanner').classList.remove('hidden');
+            if (newMode === 'game') {
+                document.getElementById('overlayGame').classList.remove('hidden');
+                nextMission();
+            }
+            if (newMode === 'checklist') {
+                document.getElementById('overlayChecklist').classList.remove('hidden');
+                renderChecklist();
+            }
+            if (newMode === 'hazmat') document.getElementById('overlayHazmat').classList.remove('hidden');
         }
 
-        els.btnExit.addEventListener('click', () => {
-            state.currentVehicle = null;
-            els.vehicleLabel.innerText = "SEM VIATURA";
-            openFleetSelector();
+        els.navBtns.forEach(btn => {
+            btn.addEventListener('click', () => switchMode(btn.dataset.mode));
         });
 
-        // 4. LOOP DE IA
-        async function loop() {
+        // === 3. LÓGICA DA CÂMARA E LOOP IA ===
+        els.btnStart.addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
+                });
+                els.video.srcObject = stream;
+                
+                els.video.onloadedmetadata = () => {
+                    els.video.play();
+                    els.startScreen.classList.add('hidden');
+                    switchMode('scanner'); // Começa no scanner
+                    state.isRunning = true;
+                    predictLoop();
+                };
+            } catch (err) {
+                alert("Acesso à câmara negado.");
+            }
+        });
+
+        async function predictLoop() {
             if (!state.isRunning) return;
 
-            if (state.currentVehicle) {
-                const predictions = await state.model.classify(els.video);
-                if (predictions.length > 0) {
-                    checkItems(predictions);
+            // Só processa IA se NÃO estiver no modo Hazmat (poupar recursos)
+            if (state.mode !== 'hazmat') {
+                try {
+                    const predictions = await state.model.classify(els.video);
+                    if (predictions.length > 0) {
+                        processPrediction(predictions[0]);
+                    }
+                } catch (e) { console.log(e); }
+            }
+
+            // Throttle 200ms
+            setTimeout(() => requestAnimationFrame(predictLoop), 200);
+        }
+
+        function processPrediction(prediction) {
+            const raw = prediction.className.toLowerCase().split(',')[0];
+            const prob = Math.round(prediction.probability * 100);
+            
+            // Tradução
+            let ptName = raw;
+            let keyMatch = null;
+
+            for (const key in dictionary) {
+                if (raw.includes(key)) {
+                    ptName = dictionary[key];
+                    keyMatch = key; // Guarda a chave para lógica interna
+                    break;
+                }
+            }
+            if (!keyMatch) ptName = raw.charAt(0).toUpperCase() + raw.slice(1);
+
+            state.detectedObject = ptName;
+            state.detectedConf = prob;
+
+            // === LÓGICA POR MODO ===
+            
+            // 1. MODO SCANNER
+            if (state.mode === 'scanner') {
+                els.scanResult.innerText = ptName;
+                els.scanConf.innerText = `Confiança: ${prob}%`;
+                
+                if (state.voiceEnabled && prob > 80 && state.lastSpoken !== ptName) {
+                    speak(ptName);
+                    state.lastSpoken = ptName;
                 }
             }
 
-            setTimeout(() => requestAnimationFrame(loop), 500); // 2 checks por segundo
-        }
-
-        function checkItems(predictions) {
-            if (!state.currentVehicle) return;
-
-            const detectedWords = predictions.map(p => p.className.toLowerCase());
-            let updated = false;
-
-            // Debug visual do que a IA está a ver
-            els.scanFeedback.innerText = "A ver: " + detectedWords[0].split(',')[0];
-
-            state.currentVehicle.items.forEach(item => {
-                // Se ainda não foi marcado
-                if (!state.checklistStatus[item.id]) {
-                    // Verifica se alguma palavra chave foi detetada
-                    const match = item.keywords.some(keyword => 
-                        detectedWords.some(detected => detected.includes(keyword))
-                    );
-
-                    if (match) {
-                        state.checklistStatus[item.id] = true;
-                        updated = true;
-                        speak("Confirmado " + item.label);
-                    }
+            // 2. MODO TREINO
+            if (state.mode === 'game' && prob > 70) {
+                if (state.gameTarget.toLowerCase() === ptName.toLowerCase()) {
+                    completeMission();
+                } else {
+                    // Update barra de "quase" baseada na confiança
+                    // (Simulação visual apenas para dar feedback)
+                    els.missionProgress.style.width = '10%';
                 }
-            });
+            }
 
-            if (updated) renderChecklist();
+            // 3. MODO CHECKLIST
+            if (state.mode === 'checklist' && prob > 75) {
+                // Procura na lista
+                const item = state.checklist.find(i => ptName.includes(i.label));
+                if (item && !item.done) {
+                    item.done = true;
+                    renderChecklist();
+                    speak("Confirmado: " + item.label);
+                }
+            }
         }
 
-        // 5. RENDERIZAR LISTA
+        // === 4. FUNCIONALIDADES ESPECÍFICAS ===
+
+        // --- GAME LOGIC ---
+        function nextMission() {
+            const targets = ['Extintor', 'Capacete', 'Viatura', 'Máscara'];
+            state.gameTarget = targets[Math.floor(Math.random() * targets.length)];
+            
+            els.missionTarget.innerText = "ENCONTRA: " + state.gameTarget.toUpperCase();
+            els.missionProgress.style.width = '0%';
+            els.missionSuccess.classList.add('hidden');
+        }
+
+        function completeMission() {
+            els.missionProgress.style.width = '100%';
+            els.missionSuccess.classList.remove('hidden');
+            speak("Missão cumprida!");
+            
+            setTimeout(() => {
+                nextMission();
+            }, 2000);
+        }
+
+        // --- CHECKLIST LOGIC ---
         function renderChecklist() {
             els.checklistItems.innerHTML = '';
-            let total = state.currentVehicle.items.length;
-            let done = 0;
+            let completed = 0;
 
-            state.currentVehicle.items.forEach(item => {
-                const isDone = state.checklistStatus[item.id];
-                if (isDone) done++;
-
+            state.checklist.forEach(item => {
+                if (item.done) completed++;
                 const li = document.createElement('li');
-                li.className = `flex justify-between items-center p-3 rounded border transition-all duration-300 ${isDone ? 'bg-green-900/40 border-green-500' : 'bg-gray-800 border-gray-700'}`;
-                
+                li.className = `flex items-center justify-between p-3 rounded border ${item.done ? 'bg-green-900/40 border-green-600' : 'bg-gray-800 border-gray-700'}`;
                 li.innerHTML = `
-                    <span class="${isDone ? 'text-white font-bold' : 'text-gray-400'}">${item.label}</span>
-                    <div class="w-6 h-6 rounded-full border flex items-center justify-center ${isDone ? 'bg-green-500 border-green-500 text-black' : 'border-gray-600'}">
-                        ${isDone ? '<i class="fas fa-check text-xs"></i>' : ''}
+                    <div class="flex items-center gap-3">
+                        <i class="fas ${item.icon} ${item.done ? 'text-green-400' : 'text-gray-500'}"></i>
+                        <span class="${item.done ? 'text-white font-bold' : 'text-gray-400'}">${item.label}</span>
                     </div>
+                    ${item.done ? '<i class="fas fa-check-circle text-green-500 check-anim"></i>' : '<div class="w-4 h-4 rounded-full border border-gray-600"></div>'}
                 `;
                 els.checklistItems.appendChild(li);
             });
 
-            // Barra de Progresso
-            const percent = Math.round((done / total) * 100);
-            els.progressText.innerText = percent + "%";
+            els.checkCount.innerText = `${completed}/${state.checklist.length}`;
+        }
+
+        els.btnResetCheck.addEventListener('click', () => {
+            state.checklist.forEach(i => i.done = false);
+            renderChecklist();
+        });
+
+        // --- HAZMAT LOGIC ---
+        els.btnHazmatSearch.addEventListener('click', () => {
+            const code = els.hazmatInput.value;
+            const info = hazmatDB[code];
             
-            if (percent === 100) {
-                els.scanFeedback.innerText = "VIATURA PRONTA!";
-                els.scanFeedback.parentElement.classList.replace('bg-black/50', 'bg-green-600');
+            if (info) {
+                els.hazmatName.innerText = info.name;
+                els.hazmatDesc.innerText = info.desc;
+                document.getElementById('hazmatClass').innerText = `Classe ${info.class}`;
+                document.getElementById('hazmatGuide').innerText = `Guia ${info.guide}`;
+                els.hazmatResult.classList.remove('hidden');
+            } else {
+                alert("Código ONU não encontrado na base de demonstração.");
             }
-        }
+        });
 
-        // Síntese de Voz
+        // --- VOICE LOGIC ---
         function speak(text) {
-            const u = new SpeechSynthesisUtterance(text);
-            u.lang = 'pt-PT';
-            window.speechSynthesis.speak(u);
+            if (!state.voiceEnabled) return;
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'pt-PT';
+            utterance.rate = 1.1;
+            window.speechSynthesis.speak(utterance);
         }
 
+        els.btnVoice.addEventListener('click', () => {
+            state.voiceEnabled = !state.voiceEnabled;
+            els.btnVoice.innerHTML = state.voiceEnabled ? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute"></i>';
+            els.btnVoice.classList.toggle('text-white');
+            els.btnVoice.classList.toggle('bg-blue-600');
+            if(state.voiceEnabled) speak("Voz ativada");
+        });
+
+        // --- REPORT LOGIC (SHARE) ---
+        els.btnReport.addEventListener('click', async () => {
+            if (!state.isRunning) return;
+
+            // 1. Obter Geolocalização
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                const lat = pos.coords.latitude.toFixed(5);
+                const lng = pos.coords.longitude.toFixed(5);
+                const date = new Date().toLocaleString('pt-PT');
+                
+                // 2. Tirar Foto
+                const ctx = els.canvas.getContext('2d');
+                els.canvas.width = els.video.videoWidth;
+                els.canvas.height = els.video.videoHeight;
+                ctx.drawImage(els.video, 0, 0);
+                
+                // 3. Preparar Texto
+                const obj = state.detectedObject || "Não identificado";
+                const text = `⚠️ REGISTO CBSL IA\n📅 ${date}\n📍 GPS: ${lat}, ${lng}\n🔍 Objeto: ${obj}\n\nEnviado via App Commander.`;
+
+                // 4. Partilhar (Web Share API)
+                if (navigator.share) {
+                    try {
+                        // Converter canvas para blob para partilhar imagem (se suportado)
+                        // Para simplificar neste ficheiro único, partilhamos texto, 
+                        // pois partilhar ficheiros requer steps complexos de blob
+                        await navigator.share({
+                            title: 'Ocorrência CBSL',
+                            text: text
+                        });
+                    } catch (err) {
+                        console.log("Partilha cancelada");
+                    }
+                } else {
+                    alert("Cópia para área de transferência:\n" + text);
+                }
+
+            }, (err) => {
+                alert("Erro GPS: " + err.message);
+            });
+        });
+
+        // Iniciar
         init();
+
     </script>
 </body>
 </html>
